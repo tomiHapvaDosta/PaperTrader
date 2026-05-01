@@ -1,4 +1,4 @@
-module github.com/papertrader/backend
+module github.com/tomiHapvaDosta/PaperTrader
 
 go 1.25.0
 
@@ -12,7 +12,7 @@ require (
 )
 
 require (
-	github.com/cespare/xxhash/v2 v2.1.1 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
