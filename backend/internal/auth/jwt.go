@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/papertrader/backend/internal/models"
+	"github.com/tomiHapvaDosta/PaperTrader/internal/models"
 
 	"github.com/golang-jwt/jwt/v5"
 )

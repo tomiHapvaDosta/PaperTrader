@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/papertrader/backend/internal/auth"
-	"github.com/papertrader/backend/internal/db"
-	"github.com/papertrader/backend/internal/handlers"
-	"github.com/papertrader/backend/internal/services"
+	"github.com/tomiHapvaDosta/PaperTrader/internal/auth"
+	"github.com/tomiHapvaDosta/PaperTrader/internal/db"
+	"github.com/tomiHapvaDosta/PaperTrader/internal/handlers"
+	"github.com/tomiHapvaDosta/PaperTrader/internal/services"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -49,8 +49,8 @@ func main() {
 	r.Use(jsonContentTypeMiddleware)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/auth/register", handlers.RegisterHandler)
-		r.Post("/auth/login", handlers.LoginHandler)
+		r.Post("/auth/register", handlers.RegisterHandler(database))
+		r.Post("/auth/login", handlers.LoginHandler(database))
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware)
