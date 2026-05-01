@@ -25,6 +25,7 @@ import (
 
 func main() {
 	_ = godotenv.Load()
+	log.Println("JWT_SECRET:", os.Getenv("JWT_SECRET"))
 
 	port := os.Getenv("PORT")
 	if port == "" {
