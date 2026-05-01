@@ -1,19 +1,112 @@
 {
     "auth": {
-        "invalid_email": "Please enter a valid email address",
-        "invalid_username": "Username must be 3-20 characters, containing only letters, numbers, and underscores",
-        "password_too_short": "Password must be at least 8 characters long",
-        "invalid_starting_balance": "Starting balance must be between $100 and $1,000,000",
-        "email_taken": "This email address is already registered",
-        "username_taken": "This username is already taken",
+        "login": "Sign In",
+        "logout": "Sign Out",
+        "register": "Create Account",
+        "email": "Email Address",
+        "password": "Password",
+        "username": "Username",
+        "starting_balance": "Starting Balance",
         "invalid_credentials": "Invalid email or password",
-        "unauthorized": "You must be logged in to access this resource"
+        "email_taken": "This email is already registered",
+        "username_taken": "This username is already taken",
+        "register_success": "Account created successfully",
+        "login_success": "Welcome back",
+        "forgot_password": "Forgot password?",
+        "reset_password": "Reset Password",
+        "back_to_login": "Back to sign in",
+        "unauthorized": "You must be signed in to access this page"
     },
-    "request": {
-        "invalid_json": "Invalid request format"
+    "nav": {
+        "dashboard": "Dashboard",
+        "markets": "Markets",
+        "orders": "Orders",
+        "settings": "Settings",
+        "logout": "Sign Out"
     },
-    "method_not_allowed": "This HTTP method is not allowed for this endpoint",
-    "server": {
-        "internal_error": "An internal server error occurred. Please try again later."
+    "dashboard": {
+        "title": "Portfolio",
+        "total_value": "Total Value",
+        "cash_balance": "Cash Balance",
+        "starting_balance": "Starting Balance",
+        "total_pnl": "Total P&L",
+        "open_positions": "Open Positions",
+        "recent_orders": "Recent Orders",
+        "performance": "Performance",
+        "no_positions": "No open positions",
+        "no_orders": "No recent orders"
+    },
+    "markets": {
+        "title": "Markets",
+        "search_placeholder": "Search ticker or company...",
+        "all": "All",
+        "stocks": "Stocks",
+        "etfs": "ETFs",
+        "crypto": "Crypto",
+        "forex": "Forex",
+        "commodities": "Commodities",
+        "price": "Price",
+        "change": "Change",
+        "volume": "Volume",
+        "market_cap": "Mkt Cap",
+        "no_results": "No results found"
+    },
+    "asset": {
+        "buy": "Buy",
+        "sell": "Sell",
+        "quantity": "Quantity",
+        "amount_usd": "Amount (USD)",
+        "order_type": "Order Type",
+        "market": "Market",
+        "limit": "Limit",
+        "stop_loss": "Stop Loss",
+        "limit_price": "Limit Price",
+        "stop_price": "Stop Price",
+        "confirm_trade": "Confirm Trade",
+        "estimated_fee": "Estimated Fee",
+        "total_cost": "Total Cost",
+        "trade_success": "Order placed successfully",
+        "insufficient_funds": "Insufficient funds",
+        "insufficient_position": "Insufficient position size"
+    },
+    "orders": {
+        "title": "Order History",
+        "all": "All",
+        "pending": "Pending",
+        "executed": "Executed",
+        "cancelled": "Cancelled",
+        "ticker": "Ticker",
+        "side": "Side",
+        "type": "Type",
+        "price": "Price",
+        "quantity": "Qty",
+        "fee": "Fee",
+        "status": "Status",
+        "date": "Date",
+        "cancel_order": "Cancel Order",
+        "cancel_confirm": "Are you sure you want to cancel this order?",
+        "no_orders": "No orders found"
+    },
+    "settings": {
+        "title": "Settings",
+        "profile": "Profile",
+        "theme": "Appearance",
+        "dark_mode": "Dark Mode",
+        "light_mode": "Light Mode",
+        "reset_balance": "Reset Portfolio",
+        "reset_confirm": "This will reset your portfolio to the starting balance. All positions and orders will be lost.",
+        "save": "Save Changes",
+        "saved": "Saved"
+    },
+    "common": {
+        "loading": "Loading...",
+        "error": "Something went wrong",
+        "retry": "Try Again",
+        "confirm": "Confirm",
+        "cancel": "Cancel",
+        "close": "Close",
+        "success": "Success",
+        "back": "Back",
+        "search": "Search"
     }
 }

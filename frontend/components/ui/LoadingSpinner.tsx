@@ -8,7 +8,7 @@ interface LoadingSpinnerProps {
 
 const sizeMap = { sm: 16, md: 24, lg: 40 };
 
-export default function LoadingSpinner({ size = 'md', fullPage = false }: LoadingSpinnerProps) {
+export function LoadingSpinner({ size = 'md', fullPage = false }: LoadingSpinnerProps) {
     const px = sizeMap[size];
 
     const spinner = (
@@ -58,3 +58,5 @@ export default function LoadingSpinner({ size = 'md', fullPage = false }: Loadin
         </div>
     );
 }
+
+export default LoadingSpinner;

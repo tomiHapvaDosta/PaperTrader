@@ -28,3 +28,7 @@ export function t(key: string): string {
 
     return typeof current === 'string' ? current : key;
 }
+
+export function useTranslation() {
+    return t;
+}

@@ -8,7 +8,7 @@ interface ErrorMessageProps {
     onRetry?: () => void;
 }
 
-export default function ErrorMessage({ message, onRetry }: ErrorMessageProps) {
+export function ErrorMessage({ message, onRetry }: ErrorMessageProps) {
     return (
         <div
             style={{
@@ -49,3 +49,5 @@ export default function ErrorMessage({ message, onRetry }: ErrorMessageProps) {
         </div>
     );
 }
+
+export default ErrorMessage;
