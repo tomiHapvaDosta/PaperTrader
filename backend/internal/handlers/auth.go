@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -85,7 +86,10 @@ func RegisterHandler(database *sql.DB) http.HandlerFunc {
 			case errors.Is(err, services.ErrEmailTaken),
 				errors.Is(err, services.ErrUsernameTaken):
 				respondJSON(w, http.StatusConflict, apiResponse{Success: false, Error: err.Error()})
+				log.Printf("register error: %v", err)
+
 			default:
+				log.Printf("register error: %v", err)
 				respondJSON(w, http.StatusInternalServerError, apiResponse{Success: false, Error: "server.internal_error"})
 			}
 			return
