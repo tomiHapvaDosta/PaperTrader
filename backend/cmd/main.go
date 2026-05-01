@@ -3,7 +3,7 @@ package main
 
 import (
 	"context"
-	"database/sql"
+	//"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -49,7 +49,13 @@ func main() {
 	r.Use(jsonContentTypeMiddleware)
 
 	marketSvc := services.NewMarketService()
+	orderSvc := services.NewOrderService(database, marketSvc)
+
 	marketHandler := handlers.NewMarketHandler(marketSvc)
+	portfolioHandler := handlers.NewPortfolioHandler(database, marketSvc)
+	positionsHandler := handlers.NewPositionsHandler(database)
+	ordersHandler := handlers.NewOrdersHandler(database, orderSvc)
+	feesHandler := handlers.NewFeesHandler(marketSvc)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/register", handlers.RegisterHandler(database))
@@ -58,22 +64,22 @@ func main() {
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware)
-			r.Get("/portfolio", handlers.PortfolioHandler)
-			r.Get("/portfolio/snapshots", handlers.PortfolioSnapshotsHandler)
-			r.Get("/positions", handlers.PositionsHandler)
-			r.Get("/orders", handlers.OrdersHandler)
-			r.Post("/orders", handlers.PlaceOrderHandler)
-			r.Delete("/orders/{id}", handlers.CancelOrderHandler)
+			r.Get("/portfolio", portfolioHandler.GetPortfolioHandler)
+			r.Get("/portfolio/snapshots", portfolioHandler.GetSnapshotsHandler)
+			r.Get("/positions", positionsHandler.GetPositionsHandler)
+			r.Get("/orders", ordersHandler.GetOrdersHandler)
+			r.Post("/orders", ordersHandler.PlaceOrderHandler)
+			r.Delete("/orders/{id}", ordersHandler.CancelOrderHandler)
 			r.Get("/market/quote/{ticker}", marketHandler.GetQuoteHandler)
 			r.Get("/market/candles/{ticker}", marketHandler.GetCandlesHandler)
 			r.Get("/market/search", marketHandler.SearchAssetsHandler)
 			r.Get("/market/profile/{ticker}", marketHandler.GetProfileHandler)
-			r.Get("/fees/estimate", handlers.FeeEstimateHandler)
+			r.Get("/fees/estimate", feesHandler.EstimateFeeHandler)
 		})
 	})
 
-	go startPendingOrderChecker(database)
-	go startSnapshotSaver(database)
+	go startPendingOrderChecker(orderSvc)
+	go startSnapshotSaver(orderSvc)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", port),
@@ -106,18 +112,18 @@ func jsonContentTypeMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func startPendingOrderChecker(database *sql.DB) {
+func startPendingOrderChecker(svc *services.OrderService) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		_ = services.CheckPendingOrders(database)
+		_ = svc.CheckPendingOrders()
 	}
 }
 
-func startSnapshotSaver(database *sql.DB) {
+func startSnapshotSaver(svc *services.OrderService) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 	for range ticker.C {
-		_ = services.SavePortfolioSnapshots(database)
+		_ = svc.TakeAllSnapshots()
 	}
 }
