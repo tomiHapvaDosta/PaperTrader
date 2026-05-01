@@ -67,6 +67,13 @@ func main() {
 			r.Get("/fees/estimate", handlers.FeeEstimateHandler)
 		})
 	})
+	marketSvc := services.NewMarketService()
+	marketHandler := handlers.NewMarketHandler(marketSvc)
+
+	r.Get("/market/quote/{ticker}", marketHandler.GetQuoteHandler)
+	r.Get("/market/candles/{ticker}", marketHandler.GetCandlesHandler)
+	r.Get("/market/search", marketHandler.SearchAssetsHandler)
+	r.Get("/market/profile/{ticker}", marketHandler.GetProfileHandler)
 
 	go startPendingOrderChecker(database)
 	go startSnapshotSaver(database)
