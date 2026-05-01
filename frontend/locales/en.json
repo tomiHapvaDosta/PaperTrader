@@ -1,0 +1,19 @@
+{
+    "auth": {
+        "invalid_email": "Please enter a valid email address",
+        "invalid_username": "Username must be 3-20 characters, containing only letters, numbers, and underscores",
+        "password_too_short": "Password must be at least 8 characters long",
+        "invalid_starting_balance": "Starting balance must be between $100 and $1,000,000",
+        "email_taken": "This email address is already registered",
+        "username_taken": "This username is already taken",
+        "invalid_credentials": "Invalid email or password",
+        "unauthorized": "You must be logged in to access this resource"
+    },
+    "request": {
+        "invalid_json": "Invalid request format"
+    },
+    "method_not_allowed": "This HTTP method is not allowed for this endpoint",
+    "server": {
+        "internal_error": "An internal server error occurred. Please try again later."
+    }
+}
