@@ -48,9 +48,13 @@ func main() {
 	r.Use(httprate.LimitByIP(100, 1*time.Minute))
 	r.Use(jsonContentTypeMiddleware)
 
+	marketSvc := services.NewMarketService()
+	marketHandler := handlers.NewMarketHandler(marketSvc)
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/register", handlers.RegisterHandler(database))
 		r.Post("/auth/login", handlers.LoginHandler(database))
+		r.Post("/auth/logout", handlers.LogoutHandler())
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.AuthMiddleware)
@@ -60,20 +64,13 @@ func main() {
 			r.Get("/orders", handlers.OrdersHandler)
 			r.Post("/orders", handlers.PlaceOrderHandler)
 			r.Delete("/orders/{id}", handlers.CancelOrderHandler)
-			r.Get("/market/quote/{ticker}", handlers.QuoteHandler)
-			r.Get("/market/candles/{ticker}", handlers.CandlesHandler)
-			r.Get("/market/search", handlers.SearchHandler)
-			r.Get("/market/profile/{ticker}", handlers.ProfileHandler)
+			r.Get("/market/quote/{ticker}", marketHandler.GetQuoteHandler)
+			r.Get("/market/candles/{ticker}", marketHandler.GetCandlesHandler)
+			r.Get("/market/search", marketHandler.SearchAssetsHandler)
+			r.Get("/market/profile/{ticker}", marketHandler.GetProfileHandler)
 			r.Get("/fees/estimate", handlers.FeeEstimateHandler)
 		})
 	})
-	marketSvc := services.NewMarketService()
-	marketHandler := handlers.NewMarketHandler(marketSvc)
-
-	r.Get("/market/quote/{ticker}", marketHandler.GetQuoteHandler)
-	r.Get("/market/candles/{ticker}", marketHandler.GetCandlesHandler)
-	r.Get("/market/search", marketHandler.SearchAssetsHandler)
-	r.Get("/market/profile/{ticker}", marketHandler.GetProfileHandler)
 
 	go startPendingOrderChecker(database)
 	go startSnapshotSaver(database)
