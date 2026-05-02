@@ -10,6 +10,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -74,6 +75,8 @@ type SearchResult struct {
 // ─── Constructor ────────────────────────────────────────────────────────────
 
 func NewMarketService() *MarketService {
+	key := os.Getenv("FINNHUB_API_KEY")
+	log.Println("Finnhub key loaded:", key != "")
 	return &MarketService{
 		apiKey:     os.Getenv("FINNHUB_API_KEY"),
 		baseURL:    "https://finnhub.io/api/v1",
