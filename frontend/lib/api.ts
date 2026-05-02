@@ -198,3 +198,5 @@ export const estimateFee = (ticker: string, assetType: string, quantity: number,
         total_cost: number;
     }>(`/fees/estimate?${params.toString()}`);
 };
+export const getCachedPrices = () =>
+    apiFetch<Quote[]>('/market/cached');

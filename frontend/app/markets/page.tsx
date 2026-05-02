@@ -157,26 +157,25 @@ export default function MarketsPage() {
     const loadDefaults = useCallback(async () => {
         try {
             setError('');
-            const fresh = await batchQuotes(DEFAULT_ASSETS, 5);
 
-            // Flash changed prices
-            const prev = prevRowsRef.current;
-            if (prev.length > 0) {
-                const newFlashes: Record<string, 'up' | 'down'> = {};
-                fresh.forEach(r => {
-                    const old = prev.find(p => p.ticker === r.ticker);
-                    if (old && old.price !== r.price) {
-                        newFlashes[r.ticker] = r.price > old.price ? 'up' : 'down';
-                    }
-                });
-                if (Object.keys(newFlashes).length > 0) {
-                    setFlashes(newFlashes);
-                    setTimeout(() => setFlashes({}), 800);
-                }
-            }
+            // Load cached prices from DB instantly — no Finnhub calls
+            const cached = await api.getCachedPrices();
 
-            prevRowsRef.current = fresh;
-            setRows(fresh);
+            // Merge cached prices with the default asset list
+            const merged: AssetRow[] = DEFAULT_ASSETS.map(asset => {
+                const found = cached.find(c => c.ticker === asset.ticker);
+                return {
+                    ticker: asset.ticker,
+                    name: asset.name,
+                    assetType: asset.assetType,
+                    price: found?.price ?? 0,
+                    change: found?.change ?? 0,
+                    changePercent: found?.change_percent ?? 0,
+                    volume: found?.volume ?? 0,
+                };
+            });
+
+            setRows(merged);
             setIsSearch(false);
         } catch (e: any) {
             setError(e?.message ?? t('common.error'));
