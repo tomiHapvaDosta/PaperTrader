@@ -49,7 +49,7 @@ func main() {
 	r.Use(httprate.LimitByIP(100, 1*time.Minute))
 	r.Use(jsonContentTypeMiddleware)
 
-	marketSvc := services.NewMarketService()
+	marketSvc := services.NewMarketService(database)
 	orderSvc := services.NewOrderService(database, marketSvc)
 
 	marketHandler := handlers.NewMarketHandler(marketSvc)
@@ -74,6 +74,7 @@ func main() {
 			r.Get("/market/quote/{ticker}", marketHandler.GetQuoteHandler)
 			r.Get("/market/candles/{ticker}", marketHandler.GetCandlesHandler)
 			r.Get("/market/search", marketHandler.SearchAssetsHandler)
+			r.Get("/market/cached", marketHandler.GetCachedPricesHandler)
 			r.Get("/market/profile/{ticker}", marketHandler.GetProfileHandler)
 			r.Get("/fees/estimate", feesHandler.EstimateFeeHandler)
 		})

@@ -1,14 +1,15 @@
-// db.go initializes the SQLite database connection and runs migrations.
+// internal/db/db.go
+// Purpose: Initializes the SQLite database connection and runs all migrations in order.
+
 package db
 
 import (
 	"database/sql"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var DB *sql.DB
@@ -19,7 +20,7 @@ func OpenDB() (*sql.DB, error) {
 		path = "./papertrader.db"
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -55,14 +56,31 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("get working dir: %w", err)
 	}
 
-	migrationPath := filepath.Join(cwd, "migrations", "001_initial_schema.sql")
-	content, err := ioutil.ReadFile(migrationPath)
-	if err != nil {
-		return fmt.Errorf("read migration file: %w", err)
+	// Run all migration files in order
+	migrations := []string{
+		"001_initial_schema.sql",
+		"002_market_cache.sql",
 	}
 
-	if _, err := db.Exec(string(content)); err != nil {
-		return fmt.Errorf("execute migration: %w", err)
+	for _, filename := range migrations {
+		migrationPath := filepath.Join(cwd, "migrations", filename)
+
+		// Skip if file doesn't exist — allows gradual rollout
+		content, err := os.ReadFile(migrationPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Printf("migration %s not found, skipping\n", filename)
+				continue
+			}
+			return fmt.Errorf("read migration %s: %w", filename, err)
+		}
+
+		if _, err := db.Exec(string(content)); err != nil {
+			return fmt.Errorf("execute migration %s: %w", filename, err)
+		}
+
+		fmt.Printf("migration %s applied\n", filename)
 	}
+
 	return nil
 }

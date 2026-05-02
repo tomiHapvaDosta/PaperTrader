@@ -133,3 +133,21 @@ func (h *MarketHandler) GetProfileHandler(w http.ResponseWriter, r *http.Request
 
 	respondJSON(w, http.StatusOK, apiResponse{Success: true, Data: profile})
 }
+
+// GET /api/v1/market/cached
+// Returns all prices currently stored in the DB cache.
+// Used by the markets page to show data instantly without hitting Finnhub.
+func (h *MarketHandler) GetCachedPricesHandler(w http.ResponseWriter, r *http.Request) {
+	quotes, err := h.market.GetAllCachedPrices()
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, apiResponse{Success: false, Error: "market.cache_error"})
+		return
+	}
+
+	// Never return null — always return an array
+	if quotes == nil {
+		quotes = []services.Quote{}
+	}
+
+	respondJSON(w, http.StatusOK, apiResponse{Success: true, Data: quotes})
+}

@@ -1,23 +1,26 @@
 // internal/services/market.go
 // Purpose: Fetches live market data from Finnhub and caches results.
-// Finnhub free tier: 60 API calls/minute, no credit card required.
-// Covers stocks, ETFs, crypto, forex, and commodities.
+// Architecture: two-layer cache —
+//   1. In-memory cache (15s TTL) — avoids duplicate HTTP calls within same minute
+//   2. SQLite price_cache — persists last known price across restarts, shown instantly on page load
+//   3. SQLite asset_metadata — stores static profile data (name, exchange, currency etc.) forever
+//
+// Finnhub free tier: 60 API calls/minute.
 // Docs: https://finnhub.io/docs/api
-// Rate limit strategy: in-memory cache with per-endpoint TTLs.
 
 package services
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sync"
 	"time"
 )
 
-// ─── Structs ────────────────────────────────────────────────────────────────
+// ─── Structs ──────────────────────────────────────────────────────────────────
 
 type CacheEntry struct {
 	data      interface{}
@@ -25,6 +28,7 @@ type CacheEntry struct {
 }
 
 type MarketService struct {
+	db         *sql.DB
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
@@ -44,6 +48,7 @@ type Quote struct {
 	Volume        float64   `json:"volume"`
 	AssetType     string    `json:"asset_type"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	Stale         bool      `json:"stale,omitempty"` // true if from DB cache, not live
 }
 
 type Candle struct {
@@ -72,20 +77,19 @@ type SearchResult struct {
 	Exchange  string `json:"exchange"`
 }
 
-// ─── Constructor ────────────────────────────────────────────────────────────
+// ─── Constructor ──────────────────────────────────────────────────────────────
 
-func NewMarketService() *MarketService {
-	key := os.Getenv("FINNHUB_API_KEY")
-	log.Println("Finnhub key loaded:", key != "")
+func NewMarketService(db *sql.DB) *MarketService {
 	return &MarketService{
-		apiKey:     os.Getenv("FINNHUB_API_KEY"),
+		db:         db,
+		apiKey:     os.Getenv("MARKET_API_KEY"),
 		baseURL:    "https://finnhub.io/api/v1",
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		cache:      make(map[string]CacheEntry),
 	}
 }
 
-// ─── Cache helpers ───────────────────────────────────────────────────────────
+// ─── In-memory cache helpers ──────────────────────────────────────────────────
 
 func (m *MarketService) isExpired(entry CacheEntry) bool {
 	return time.Now().After(entry.expiresAt)
@@ -107,7 +111,7 @@ func (m *MarketService) getCache(key string) (interface{}, bool) {
 	return entry.data, true
 }
 
-// ─── HTTP helper ─────────────────────────────────────────────────────────────
+// ─── HTTP helper ──────────────────────────────────────────────────────────────
 
 func (m *MarketService) get(url string, target interface{}) error {
 	req, err := http.NewRequest("GET", url, nil)
@@ -132,56 +136,169 @@ func (m *MarketService) get(url string, target interface{}) error {
 	return nil
 }
 
-// ─── GetQuote ────────────────────────────────────────────────────────────────
+// ─── DB price cache ───────────────────────────────────────────────────────────
+
+func (m *MarketService) getPriceFromDB(ticker string) (*Quote, error) {
+	var q Quote
+	var fetchedAt time.Time
+	err := m.db.QueryRow(`
+		SELECT ticker, price, change, change_percent, high, low, open,
+		       previous_close, volume, asset_type, fetched_at
+		FROM price_cache WHERE ticker = ?`, ticker,
+	).Scan(
+		&q.Ticker, &q.Price, &q.Change, &q.ChangePercent,
+		&q.High, &q.Low, &q.Open, &q.PreviousClose,
+		&q.Volume, &q.AssetType, &fetchedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	q.UpdatedAt = fetchedAt
+	q.Stale = true
+	return &q, nil
+}
+
+func (m *MarketService) savePriceToDB(q *Quote) {
+	_, _ = m.db.Exec(`
+		INSERT INTO price_cache
+		  (ticker, price, change, change_percent, high, low, open,
+		   previous_close, volume, asset_type, fetched_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ticker) DO UPDATE SET
+		  price          = excluded.price,
+		  change         = excluded.change,
+		  change_percent = excluded.change_percent,
+		  high           = excluded.high,
+		  low            = excluded.low,
+		  open           = excluded.open,
+		  previous_close = excluded.previous_close,
+		  volume         = excluded.volume,
+		  asset_type     = excluded.asset_type,
+		  fetched_at     = excluded.fetched_at`,
+		q.Ticker, q.Price, q.Change, q.ChangePercent,
+		q.High, q.Low, q.Open, q.PreviousClose,
+		q.Volume, q.AssetType, q.UpdatedAt,
+	)
+}
+
+// ─── DB metadata cache ────────────────────────────────────────────────────────
+
+func (m *MarketService) getProfileFromDB(ticker string) (*AssetProfile, error) {
+	var p AssetProfile
+	err := m.db.QueryRow(`
+		SELECT ticker, name, asset_type, exchange, currency, logo, description
+		FROM asset_metadata WHERE ticker = ?`, ticker,
+	).Scan(&p.Ticker, &p.Name, &p.AssetType, &p.Exchange, &p.Currency, &p.Logo, &p.Description)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (m *MarketService) saveProfileToDB(p *AssetProfile) {
+	_, _ = m.db.Exec(`
+		INSERT INTO asset_metadata
+		  (ticker, name, asset_type, exchange, currency, logo, description, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ticker) DO UPDATE SET
+		  name        = excluded.name,
+		  asset_type  = excluded.asset_type,
+		  exchange    = excluded.exchange,
+		  currency    = excluded.currency,
+		  logo        = excluded.logo,
+		  description = excluded.description,
+		  updated_at  = excluded.updated_at`,
+		p.Ticker, p.Name, p.AssetType, p.Exchange,
+		p.Currency, p.Logo, p.Description, time.Now().UTC(),
+	)
+}
+
+// ─── GetAllCachedPrices ───────────────────────────────────────────────────────
+// Returns all prices stored in DB — used by markets page for instant load.
+
+func (m *MarketService) GetAllCachedPrices() ([]Quote, error) {
+	rows, err := m.db.Query(`
+		SELECT ticker, price, change, change_percent, high, low, open,
+		       previous_close, volume, asset_type, fetched_at
+		FROM price_cache ORDER BY ticker ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var quotes []Quote
+	for rows.Next() {
+		var q Quote
+		var fetchedAt time.Time
+		if err := rows.Scan(
+			&q.Ticker, &q.Price, &q.Change, &q.ChangePercent,
+			&q.High, &q.Low, &q.Open, &q.PreviousClose,
+			&q.Volume, &q.AssetType, &fetchedAt,
+		); err != nil {
+			continue
+		}
+		q.UpdatedAt = fetchedAt
+		q.Stale = true
+		quotes = append(quotes, q)
+	}
+	return quotes, nil
+}
+
+// ─── GetQuote ─────────────────────────────────────────────────────────────────
+// Order: in-memory cache → Finnhub live → DB stale fallback
 
 func (m *MarketService) GetQuote(ticker string, assetType string) (*Quote, error) {
 	cacheKey := "quote:" + ticker
 
+	// 1. In-memory cache (15s)
 	if cached, ok := m.getCache(cacheKey); ok {
 		q := cached.(Quote)
 		return &q, nil
 	}
 
+	// 2. Try Finnhub live
 	url := fmt.Sprintf("%s/quote?symbol=%s", m.baseURL, ticker)
-
 	var raw struct {
-		C  float64 `json:"c"`  // current price
-		D  float64 `json:"d"`  // change
-		Dp float64 `json:"dp"` // change percent
-		H  float64 `json:"h"`  // high
-		L  float64 `json:"l"`  // low
-		O  float64 `json:"o"`  // open
-		Pc float64 `json:"pc"` // previous close
-		V  float64 `json:"v"`  // volume (not always present)
+		C  float64 `json:"c"`
+		D  float64 `json:"d"`
+		Dp float64 `json:"dp"`
+		H  float64 `json:"h"`
+		L  float64 `json:"l"`
+		O  float64 `json:"o"`
+		Pc float64 `json:"pc"`
+		V  float64 `json:"v"`
 	}
 
-	if err := m.get(url, &raw); err != nil {
-		return nil, err
+	liveErr := m.get(url, &raw)
+	if liveErr == nil && raw.C > 0 {
+		quote := Quote{
+			Ticker:        ticker,
+			Price:         raw.C,
+			Change:        raw.D,
+			ChangePercent: raw.Dp,
+			High:          raw.H,
+			Low:           raw.L,
+			Open:          raw.O,
+			PreviousClose: raw.Pc,
+			Volume:        raw.V,
+			AssetType:     assetType,
+			UpdatedAt:     time.Now().UTC(),
+			Stale:         false,
+		}
+		m.setCache(cacheKey, quote, 15*time.Second)
+		m.savePriceToDB(&quote) // persist to DB
+		return &quote, nil
 	}
 
-	if raw.C == 0 {
-		return nil, fmt.Errorf("ticker not found: %s", ticker)
+	// 3. Fallback: return stale DB value if live fetch failed
+	if dbQuote, err := m.getPriceFromDB(ticker); err == nil {
+		return dbQuote, nil
 	}
 
-	quote := Quote{
-		Ticker:        ticker,
-		Price:         raw.C,
-		Change:        raw.D,
-		ChangePercent: raw.Dp,
-		High:          raw.H,
-		Low:           raw.L,
-		Open:          raw.O,
-		PreviousClose: raw.Pc,
-		Volume:        raw.V,
-		AssetType:     assetType,
-		UpdatedAt:     time.Now().UTC(),
-	}
-
-	m.setCache(cacheKey, quote, 15*time.Second)
-	return &quote, nil
+	return nil, fmt.Errorf("ticker not found: %s", ticker)
 }
 
-// ─── GetCandles ──────────────────────────────────────────────────────────────
+// ─── GetCandles ───────────────────────────────────────────────────────────────
 
 func (m *MarketService) GetCandles(ticker, assetType string, from, to int64, resolution string) ([]Candle, error) {
 	cacheKey := fmt.Sprintf("candles:%s:%s:%d:%d:%s", ticker, assetType, from, to, resolution)
@@ -199,7 +316,6 @@ func (m *MarketService) GetCandles(ticker, assetType string, from, to int64, res
 		url = fmt.Sprintf("%s/forex/candle?symbol=%s&resolution=%s&from=%d&to=%d",
 			m.baseURL, ticker, resolution, from, to)
 	default:
-		// stock, etf, commodity
 		url = fmt.Sprintf("%s/stock/candle?symbol=%s&resolution=%s&from=%d&to=%d",
 			m.baseURL, ticker, resolution, from, to)
 	}
@@ -211,13 +327,12 @@ func (m *MarketService) GetCandles(ticker, assetType string, from, to int64, res
 		O []float64 `json:"o"`
 		T []int64   `json:"t"`
 		V []float64 `json:"v"`
-		S string    `json:"s"` // "ok" or "no_data"
+		S string    `json:"s"`
 	}
 
 	if err := m.get(url, &raw); err != nil {
 		return nil, err
 	}
-
 	if raw.S != "ok" || len(raw.T) == 0 {
 		return nil, fmt.Errorf("no candle data for %s", ticker)
 	}
@@ -225,12 +340,8 @@ func (m *MarketService) GetCandles(ticker, assetType string, from, to int64, res
 	candles := make([]Candle, len(raw.T))
 	for i := range raw.T {
 		candles[i] = Candle{
-			Time:   raw.T[i],
-			Open:   raw.O[i],
-			High:   raw.H[i],
-			Low:    raw.L[i],
-			Close:  raw.C[i],
-			Volume: raw.V[i],
+			Time: raw.T[i], Open: raw.O[i], High: raw.H[i],
+			Low: raw.L[i], Close: raw.C[i], Volume: raw.V[i],
 		}
 	}
 
@@ -238,7 +349,7 @@ func (m *MarketService) GetCandles(ticker, assetType string, from, to int64, res
 	return candles, nil
 }
 
-// ─── SearchAssets ────────────────────────────────────────────────────────────
+// ─── SearchAssets ─────────────────────────────────────────────────────────────
 
 func (m *MarketService) SearchAssets(query string) ([]SearchResult, error) {
 	cacheKey := "search:" + query
@@ -248,7 +359,6 @@ func (m *MarketService) SearchAssets(query string) ([]SearchResult, error) {
 	}
 
 	url := fmt.Sprintf("%s/search?q=%s", m.baseURL, query)
-
 	var raw struct {
 		Result []struct {
 			Symbol        string `json:"symbol"`
@@ -256,7 +366,6 @@ func (m *MarketService) SearchAssets(query string) ([]SearchResult, error) {
 			Type          string `json:"type"`
 			DisplaySymbol string `json:"displaySymbol"`
 		} `json:"result"`
-		Count int `json:"count"`
 	}
 
 	if err := m.get(url, &raw); err != nil {
@@ -282,31 +391,37 @@ func (m *MarketService) SearchAssets(query string) ([]SearchResult, error) {
 	return results, nil
 }
 
-// ─── GetProfile ──────────────────────────────────────────────────────────────
+// ─── GetProfile ───────────────────────────────────────────────────────────────
+// Order: in-memory cache → DB (permanent) → Finnhub live
 
 func (m *MarketService) GetProfile(ticker, assetType string) (*AssetProfile, error) {
 	cacheKey := "profile:" + ticker
 
+	// 1. In-memory cache (1 hour)
 	if cached, ok := m.getCache(cacheKey); ok {
 		p := cached.(AssetProfile)
 		return &p, nil
 	}
 
-	url := fmt.Sprintf("%s/stock/profile2?symbol=%s", m.baseURL, ticker)
+	// 2. DB cache (permanent — profile data rarely changes)
+	if dbProfile, err := m.getProfileFromDB(ticker); err == nil {
+		m.setCache(cacheKey, *dbProfile, time.Hour)
+		return dbProfile, nil
+	}
 
+	// 3. Fetch from Finnhub and persist
+	url := fmt.Sprintf("%s/stock/profile2?symbol=%s", m.baseURL, ticker)
 	var raw struct {
 		Name     string `json:"name"`
 		Ticker   string `json:"ticker"`
 		Exchange string `json:"exchange"`
 		Currency string `json:"currency"`
 		Logo     string `json:"logo"`
-		Ipo      string `json:"ipo"`
 	}
 
 	if err := m.get(url, &raw); err != nil {
 		return nil, err
 	}
-
 	if raw.Name == "" {
 		return nil, fmt.Errorf("profile not found for ticker: %s", ticker)
 	}
@@ -320,11 +435,12 @@ func (m *MarketService) GetProfile(ticker, assetType string) (*AssetProfile, err
 		Logo:      raw.Logo,
 	}
 
-	m.setCache(cacheKey, profile, 3600*time.Second)
+	m.saveProfileToDB(&profile)
+	m.setCache(cacheKey, profile, time.Hour)
 	return &profile, nil
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func normalizeAssetType(finnhubType string) string {
 	switch finnhubType {
