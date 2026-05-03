@@ -185,6 +185,32 @@ export default function MarketsPage() {
     }, []);
 
     useEffect(() => {
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                // Force reload cached prices from DB
+                api.getCachedPrices().then(cached => {
+                    const merged: AssetRow[] = DEFAULT_ASSETS.map(asset => {
+                        const found = cached.find(c => c.ticker === asset.ticker);
+                        return {
+                            ticker: asset.ticker,
+                            name: asset.name,
+                            assetType: asset.assetType,
+                            price: found?.price ?? 0,
+                            change: found?.change ?? 0,
+                            changePercent: found?.change_percent ?? 0,
+                            volume: found?.volume ?? 0,
+                        };
+                    });
+                    setRows(merged);
+                    setIsSearch(false);
+                }).catch(() => { });
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => document.removeEventListener('visibilitychange', handleVisibility);
+    }, []);
+
+    useEffect(() => {
         loadDefaults();
         intervalRef.current = setInterval(loadDefaults, 30_000);
         return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
@@ -201,13 +227,23 @@ export default function MarketsPage() {
         debounceRef.current = setTimeout(async () => {
             setSearching(true);
             try {
-                const results = await api.searchAssets(query);
-                const mapped: AssetRow[] = results.map(r => ({
-                    ticker: r.ticker,
-                    name: r.name,
-                    assetType: r.asset_type,
-                    price: 0, change: 0, changePercent: 0, volume: 0,
-                }));
+                const [results, cached] = await Promise.all([
+                    api.searchAssets(query),
+                    api.getCachedPrices(),
+                ]);
+
+                const mapped: AssetRow[] = results.map(r => {
+                    const found = cached.find(c => c.ticker === r.ticker);
+                    return {
+                        ticker: r.ticker,
+                        name: r.name,
+                        assetType: r.asset_type,
+                        price: found?.price ?? 0,
+                        change: found?.change ?? 0,
+                        changePercent: found?.change_percent ?? 0,
+                        volume: found?.volume ?? 0,
+                    };
+                });
                 setRows(mapped);
                 setIsSearch(true);
                 setPage(1);

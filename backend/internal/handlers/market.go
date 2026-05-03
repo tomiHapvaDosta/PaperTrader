@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -92,6 +93,8 @@ func (h *MarketHandler) GetCandlesHandler(w http.ResponseWriter, r *http.Request
 		respondJSON(w, http.StatusInternalServerError, apiResponse{Success: false, Error: "market.candles_error"})
 		return
 	}
+
+	log.Printf("candles request: ticker=%s from=%d to=%d resolution=%s", ticker, from, to, resolution)
 
 	respondJSON(w, http.StatusOK, apiResponse{Success: true, Data: candles})
 }

@@ -4,6 +4,7 @@
 
 'use client';
 
+import { createChart, ColorType, CandlestickSeries, AreaSeries } from 'lightweight-charts';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -34,6 +35,17 @@ interface FeeEstimate {
     total_cost: number;
     price: number;
     quantity: number;
+}
+
+interface ChartDataPoint {
+    time: number;
+    label: string;
+    price: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    bullish: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -121,6 +133,104 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
             {type === 'success' ? '✓ ' : '⚠ '}{message}
         </div>
     );
+}
+
+// ─── Trading Chart ────────────────────────────────────────────────────────────────────
+
+// Add this component above AssetDetailPage
+function TradingChart({ data, type }: { data: ChartDataPoint[]; type: ChartType }) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const chartRef = useRef<any>(null);
+    const seriesRef = useRef<any>(null);
+
+    useEffect(() => {
+        if (!containerRef.current || data.length === 0) return;
+
+        // Destroy previous chart
+        if (chartRef.current) {
+            chartRef.current.remove();
+            chartRef.current = null;
+        }
+
+        const chart = createChart(containerRef.current, {
+            layout: {
+                background: { type: ColorType.Solid, color: 'transparent' },
+                textColor: '#6b7a99',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255,255,255,0.03)' },
+                horzLines: { color: 'rgba(255,255,255,0.03)' },
+            },
+            crosshair: {
+                vertLine: { color: 'rgba(255,255,255,0.2)' },
+                horzLine: { color: 'rgba(255,255,255,0.2)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255,255,255,0.06)',
+            },
+            timeScale: {
+                borderColor: 'rgba(255,255,255,0.06)',
+                timeVisible: true,
+            },
+            width: containerRef.current.clientWidth,
+            height: 300,
+        });
+
+        chartRef.current = chart;
+
+        if (type === 'candle') {
+            const series = chart.addSeries(CandlestickSeries, {
+                upColor: '#00ff87',
+                downColor: '#ff4d6d',
+                borderUpColor: '#00ff87',
+                borderDownColor: '#ff4d6d',
+                wickUpColor: '#00ff87',
+                wickDownColor: '#ff4d6d',
+            });
+            series.setData(data.map(d => ({
+                time: d.time as any,
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close,
+            })));
+            seriesRef.current = series;
+        } else {
+            const series = chart.addSeries(AreaSeries, {
+                lineColor: '#0ea5e9',
+                topColor: 'rgba(14,165,233,0.15)',
+                bottomColor: 'rgba(14,165,233,0)',
+                lineWidth: 2,
+            });
+            series.setData(data.map(d => ({
+                time: d.time as any,
+                value: d.close,
+            })));
+            seriesRef.current = series;
+        }
+
+        chart.timeScale().fitContent();
+
+        // Handle resize
+        const handleResize = () => {
+            if (containerRef.current && chartRef.current) {
+                chartRef.current.applyOptions({
+                    width: containerRef.current.clientWidth,
+                });
+            }
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if (chartRef.current) {
+                chartRef.current.remove();
+                chartRef.current = null;
+            }
+        };
+    }, [data, type]);
+
+    return <div ref={containerRef} style={{ width: '100%', height: 300 }} />;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -573,53 +683,19 @@ export default function AssetDetailPage() {
                                     {/* Chart area */}
                                     <div style={{ height: 300, position: 'relative' }}>
                                         {chartLoading ? (
-                                            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <div style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                 <LoadingSpinner size="sm" />
                                             </div>
                                         ) : chartData.length < 2 ? (
                                             <div style={{
-                                                height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center',
                                                 fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: '#6b7a99',
                                                 border: '1px dashed rgba(255,255,255,0.08)',
                                             }}>
                                                 No chart data for this range
                                             </div>
-                                        ) : chartType === 'line' ? (
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                                                    <defs>
-                                                        <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
-                                                            <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.15} />
-                                                            <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                                                        </linearGradient>
-                                                    </defs>
-                                                    <CartesianGrid stroke="rgba(255,255,255,0.03)" vertical={false} />
-                                                    <XAxis dataKey="label" tick={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, fill: '#6b7a99' }} axisLine={false} tickLine={false} />
-                                                    <YAxis tickFormatter={v => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v.toFixed(0))} tick={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, fill: '#6b7a99' }} axisLine={false} tickLine={false} width={60} domain={['auto', 'auto']} />
-                                                    <Tooltip content={<LineTooltip />} />
-                                                    <Area type="monotone" dataKey="price" stroke="#0ea5e9" strokeWidth={2} fill="url(#lineGrad)" dot={false} activeDot={{ r: 4, fill: '#0ea5e9', stroke: '#0d1120', strokeWidth: 2 }} />
-                                                </AreaChart>
-                                            </ResponsiveContainer>
                                         ) : (
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                                                    <CartesianGrid stroke="rgba(255,255,255,0.03)" vertical={false} />
-                                                    <XAxis dataKey="label" tick={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, fill: '#6b7a99' }} axisLine={false} tickLine={false} />
-                                                    <YAxis tickFormatter={v => '$' + v.toFixed(0)} tick={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, fill: '#6b7a99' }} axisLine={false} tickLine={false} width={60} domain={['auto', 'auto']} />
-                                                    <Tooltip content={<CandleTooltip />} />
-                                                    <Bar dataKey="close" fill="transparent" shape={(props: any) => {
-                                                        const { x, y, width, height, payload } = props;
-                                                        const bull = payload.bullish;
-                                                        const color = bull ? '#00ff87' : '#ff4d6d';
-                                                        const bodyH = Math.max(Math.abs(height), 2);
-                                                        return (
-                                                            <g>
-                                                                <rect x={x + width * 0.2} y={bull ? y : y + height} width={width * 0.6} height={bodyH} fill={color} fillOpacity={0.7} rx={1} />
-                                                            </g>
-                                                        );
-                                                    }} />
-                                                </ComposedChart>
-                                            </ResponsiveContainer>
+                                            <TradingChart data={chartData} type={chartType} />
                                         )}
                                     </div>
                                 </div>

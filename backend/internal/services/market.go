@@ -14,8 +14,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -80,6 +83,10 @@ type SearchResult struct {
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
 func NewMarketService(db *sql.DB) *MarketService {
+	key := os.Getenv("MARKET_API_KEY")
+
+	log.Printf("API key loaded: '%s'", key)
+
 	return &MarketService{
 		db:         db,
 		apiKey:     os.Getenv("MARKET_API_KEY"),
@@ -270,6 +277,9 @@ func (m *MarketService) GetQuote(ticker string, assetType string) (*Quote, error
 	}
 
 	liveErr := m.get(url, &raw)
+	if liveErr != nil {
+		log.Printf("finnhub error for %s: %v", ticker, liveErr)
+	}
 	if liveErr == nil && raw.C > 0 {
 		quote := Quote{
 			Ticker:        ticker,
@@ -307,46 +317,97 @@ func (m *MarketService) GetCandles(ticker, assetType string, from, to int64, res
 		return cached.([]Candle), nil
 	}
 
-	var url string
-	switch assetType {
-	case "crypto":
-		url = fmt.Sprintf("%s/crypto/candle?symbol=%s&resolution=%s&from=%d&to=%d",
-			m.baseURL, ticker, resolution, from, to)
-	case "forex":
-		url = fmt.Sprintf("%s/forex/candle?symbol=%s&resolution=%s&from=%d&to=%d",
-			m.baseURL, ticker, resolution, from, to)
+	// Map resolution to Yahoo Finance interval and range
+	var interval string
+	switch resolution {
+	case "5":
+		interval = "5m"
+	case "60":
+		interval = "1h"
+	case "D":
+		interval = "1d"
+	case "W":
+		interval = "1wk"
+	case "M":
+		interval = "1mo"
 	default:
-		url = fmt.Sprintf("%s/stock/candle?symbol=%s&resolution=%s&from=%d&to=%d",
-			m.baseURL, ticker, resolution, from, to)
+		interval = "1d"
 	}
+
+	url := fmt.Sprintf(
+		"https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=%s&period1=%d&period2=%d",
+		ticker, interval, from, to,
+	)
 
 	var raw struct {
-		C []float64 `json:"c"`
-		H []float64 `json:"h"`
-		L []float64 `json:"l"`
-		O []float64 `json:"o"`
-		T []int64   `json:"t"`
-		V []float64 `json:"v"`
-		S string    `json:"s"`
+		Chart struct {
+			Result []struct {
+				Timestamp  []int64 `json:"timestamp"`
+				Indicators struct {
+					Quote []struct {
+						Open   []float64 `json:"open"`
+						High   []float64 `json:"high"`
+						Low    []float64 `json:"low"`
+						Close  []float64 `json:"close"`
+						Volume []float64 `json:"volume"`
+					} `json:"quote"`
+				} `json:"indicators"`
+			} `json:"result"`
+			Error interface{} `json:"error"`
+		} `json:"chart"`
 	}
 
-	if err := m.get(url, &raw); err != nil {
-		return nil, err
+	if err := m.getPlain(url, &raw); err != nil {
+		log.Printf("yahoo finance error for %s: %v", ticker, err)
+		return nil, fmt.Errorf("candle fetch failed: %w", err)
 	}
-	if raw.S != "ok" || len(raw.T) == 0 {
+
+	if len(raw.Chart.Result) == 0 {
 		return nil, fmt.Errorf("no candle data for %s", ticker)
 	}
 
-	candles := make([]Candle, len(raw.T))
-	for i := range raw.T {
-		candles[i] = Candle{
-			Time: raw.T[i], Open: raw.O[i], High: raw.H[i],
-			Low: raw.L[i], Close: raw.C[i], Volume: raw.V[i],
-		}
+	result := raw.Chart.Result[0]
+	if len(result.Timestamp) == 0 || len(result.Indicators.Quote) == 0 {
+		return nil, fmt.Errorf("no candle data for %s", ticker)
 	}
+
+	quotes := result.Indicators.Quote[0]
+	candles := make([]Candle, 0, len(result.Timestamp))
+
+	for i, ts := range result.Timestamp {
+		if i >= len(quotes.Close) || quotes.Close[i] == 0 {
+			continue
+		}
+		candles = append(candles, Candle{
+			Time:   ts,
+			Open:   quotes.Open[i],
+			High:   quotes.High[i],
+			Low:    quotes.Low[i],
+			Close:  quotes.Close[i],
+			Volume: quotes.Volume[i],
+		})
+	}
+
+	if len(candles) == 0 {
+		return nil, fmt.Errorf("no candle data for %s", ticker)
+	}
+
+	sort.Slice(candles, func(i, j int) bool {
+		return candles[i].Time < candles[j].Time
+	})
 
 	m.setCache(cacheKey, candles, 60*time.Second)
 	return candles, nil
+}
+
+// parseFloat safely converts interface{} to float64
+func parseFloat(v interface{}) float64 {
+	s, ok := v.(string)
+	if !ok {
+		return 0
+	}
+	f, _ := strconv.ParseFloat(s, 64)
+	return f
 }
 
 // ─── SearchAssets ─────────────────────────────────────────────────────────────
@@ -455,4 +516,30 @@ func normalizeAssetType(finnhubType string) string {
 	default:
 		return "stock"
 	}
+}
+
+func (m *MarketService) getPlain(url string, target interface{}) error {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+
+	// Required for Yahoo Finance — blocks requests without a browser User-Agent
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("returned status %d", resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
 }
